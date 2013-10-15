@@ -1,0 +1,296 @@
+
+#include "algorithm.nxc"
+#include "com.nxc"
+
+// in development
+/*
+   Changelog:
+   exchanged delimiter <> with []
+   .. saves process time! 3/5 of time before
+   speed optimized readString by a prefinder, 1/4 of time before!
+*/
+/* !note! : Always pass uninitialized arrays into functions!!!!
+Always create new data file! (Dont forget to delete old file!)
+to do:
+-> install a pre finder in readArray...
+-> reimplement save numericArray
+-> make process optimations
+
+// timing copy paste
+   long t0 = CurrentTick();
+   long t1 = CurrentTick() - t0;
+   NumOut(0, LCD_LINE4, t1);
+
+*/
+
+// find string in file
+// returns the line and position or -1 if not found
+inline unsigned long findText(byte handle, string text, int &pos = 0)
+{
+   unsigned int ret;
+   unsigned long line;
+   string read;
+
+   while(LDR_ENDOFFILE != ret || LDR_SUCCESS == ret) {
+      line = ftell(handle);
+      ret = ReadLnString(handle, read);
+      pos = Pos(text, read);
+      if( pos > 0)
+        return line;
+   }
+   return -1;
+}
+
+
+// Save String
+inline unsigned int saveString(byte handle, string varName, string data)
+{
+   unsigned int bytesWritten;
+   string write;
+   
+   write = StrCat("[", varName, "=", data, "]");
+   return WriteLnString(handle, write, bytesWritten);
+}
+
+
+inline unsigned int saveNumber(byte handle, string varName, float data)
+{
+   return saveString(handle, varName, NumToStr(data));
+}
+
+
+// get string
+string readString(byte handle, string varName)
+{
+   string del[] = {"[","=","]"};
+   string read;
+   string temp[];
+   int len = StrLen(varName);
+   int line;
+   unsigned int ret;
+   rewind(handle);
+   
+   // pre finder 13 ms (2 lines)
+   line = findText(handle, varName);
+   if(line < 0)
+      return "NULL";                      // EXIT
+
+   // 5ms
+   fseek(handle, line, SEEK_SET);
+   ReadLnString(handle, read);
+   
+   // 43 ms
+   if(tokenizeEx(read, del, temp) > 0) {
+      if(temp[0] == varName) {  // check again
+         return temp[1];                 // EXIT
+      }
+   }
+   return "NULL";                        // EXIT
+}
+
+
+inline float readNumber(byte handle, string varName)
+{
+   return StrToNum( readString(handle, varName) );
+}
+
+
+// save string array
+unsigned int saveStringArray(byte handle, string arrayName, string &data[])
+{
+   short bytesWritten;
+   string write;
+   unsigned int len = ArrayLen(data);
+
+   for(int i=0; i<len; ++i)
+   {
+      unsigned int ret;
+      write = StrCat("[", arrayName, "[", NumToStr(i), "]", "=", data[i], "]");
+      ret = WriteLnString(handle, write, bytesWritten);
+      if(ret != LDR_SUCCESS) return ret;
+   }
+   return LDR_SUCCESS;
+}
+
+// would be better to implement the above function with numbers
+unsigned int saveNumericArray(byte handle, string arrayName, float &data[])
+{
+   string strData[];
+   unsigned int len = ArrayLen(data);
+
+   ArrayInit(strData, 0, len);
+   
+   for(int i=0; i<len; ++i) {
+      strData[i] = NumToStr( data[i] );
+   }
+   return saveStringArray(handle, arrayName, strData);
+}
+
+
+// get string array
+unsigned int readStringArray(byte handle, string arrayName, string &data[])
+{
+   string del[] = {"[","]","="};
+   string read;
+   string temp[];   // only pass unitializied arrays in the strtok!
+
+   rewind(handle);
+
+   unsigned int ret;
+   unsigned int idx;
+
+   // we need a pre finder like saveStr
+
+   // resize array when data len is more then expected!
+   // make this value bigger if you expect much data!
+   // make this value bigger if you have problems with process time
+   // make this value smaler if you run out of memory (File Error -1)
+   unsigned int len_threshold = 20;
+   ArrayInit(data, "", len_threshold);
+
+   while(LDR_ENDOFFILE != ret) {
+       ret = ReadLnString(handle, read);
+       if(LDR_ENDOFFILE == ret)
+          return idx+1;
+       if(tokenizeEx(read, del, temp) != -1) {
+          if(temp[0] == arrayName) {
+             idx = StrToNum(temp[1]);
+             if(idx >= (len_threshold-1)) {
+                len_threshold += 20;
+                arrayResizeStr(data, len_threshold);
+             }
+             data[idx] = temp[3];
+          }
+       }
+   }
+   return idx+1;
+}
+
+
+
+unsigned int readNumericArray(byte handle, string arrayName, float &data[])
+{
+   unsigned int ret;
+
+   string strData[];
+   
+   ret = readStringArray(handle, arrayName, strData);
+   
+   for(int i=0; i<ret; ++i) {
+      data[i] = StrToNum( strData[i] );
+   }
+   return ret;
+}
+
+
+// start at 33 end at 127, 127
+// currently testet in xTest_encrypt
+inline string encrypt(string str, string key, bool mode = true)
+{
+   int key_count = 0;
+   string ret = "**********************************************";
+	 char ch;
+
+   for(int i=0; i<strlen(str); i++) {
+
+     if(!mode)
+        str[i]--;
+     ch = str[i] ^ key[key_count];
+     if(mode)
+        ch++;
+     ret[i] = ch;
+     key_count++;
+		 if(key_count >= strlen(key))
+			 key_count = 0;
+
+     // coutNum(str[i], 500);
+     // coutNum(key[key_count], 500);
+     // coutNum(ch, 500);
+     // cout(ret, 500);
+   }
+   return LeftStr(ret, strlen(str));
+}
+
+
+task main()
+{
+   byte handle;
+   short bytesWritten;
+   /*
+   DeleteFile("data.txt");
+   int f1 = CreateFile("data.txt", 2048, handle);
+
+   //int f1 = OpenFileAppend("data.txt", bytesWritten, handle);
+
+   string myString1 = "Master";
+   string myString2 = "Slave";
+   saveString(handle, "myString1", myString1);
+   saveString(handle, "myString2", myString2);
+   CloseFile(handle);
+
+   string ff1 = FormatNum("%x", f1);
+
+   TextOut(0, LCD_LINE1, ff1);
+   CloseFile(handle);
+   Wait(3000);
+   */
+
+
+   OpenFileRead("data.txt", bytesWritten, handle);
+
+   string myString1 = "";
+   string myString2 = "";
+
+   long t0 = CurrentTick();
+   myString1 = readString(handle, "myString1");
+   long t = CurrentTick() - t0;
+   myString2 = readString(handle, "myString2");
+
+   CloseFile(handle);
+
+   TextOut(0, LCD_LINE1, myString1);
+   TextOut(0, LCD_LINE2, myString2);
+   NumOut(0, LCD_LINE8, t);
+
+   Wait(10000);
+
+
+
+
+   /*Save Array
+   DeleteFile("data.txt");
+   CreateFile("data.txt", 1024, handle);
+   
+   string myArray[] = {"Hund", "Hase", "Schwein", "Vogel", "Mensch", "Fisch"};
+   saveStringArray(handle , "myArray", myArray);
+   */
+
+   /*
+   // Open my Array
+   int file_size;
+   long t0 = CurrentTick();
+   
+   OpenFileRead("data.txt", file_size, handle);
+   
+   string myArray[];  // my Array is still empty :(
+   
+   readStringArray(handle, "myArray", myArray);
+   // Close File we dont need it any more!
+   CloseFile(handle);
+   
+   long t = CurrentTick() - t0;
+   // 425 ms :  ~105ms/line
+
+   // Problem at arrayTokenizeEx -> resize to output -> ArrayLen(array), len only 1?
+   // Lets see if there is something in the Array
+   TextOut(0, LCD_LINE1, myArray[0]);
+   TextOut(0, LCD_LINE2, myArray[1]);
+   TextOut(0, LCD_LINE3, myArray[2]);
+   TextOut(0, LCD_LINE4, myArray[3]);
+   TextOut(0, LCD_LINE5, myArray[4]);
+   TextOut(0, LCD_LINE6, myArray[5]);
+   NumOut(0, LCD_LINE8, t);
+   
+   Wait(10000);
+   */
+}

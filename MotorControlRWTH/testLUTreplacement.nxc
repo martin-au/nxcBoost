@@ -1,0 +1,139 @@
+
+/*
+SSQABS: 3453.74297487
+RMSE: 3.38736315626
+*/
+inline float Polynomial_MarcPlanteQuadratic_InverseWithOffset_model(float x_in)
+{
+ float temp;
+ temp = 0.0;
+ // coefficients
+ const float a = -3.2792562224550464E+05;
+ const float b = -1.9586306729374384E+04;
+ const float c = 7.8641163416396971E+00;
+ const float Offset = 9.9978753501602041E+03;
+ temp += ((-1.0 * b) + pow((b * b) - 4.0 * a * (c - x_in), 0.5)) / 2.0 / a;
+ temp = x_in / temp + Offset;
+ return temp;
+}
+
+
+/*
+Best function but 1ms process time!
+
+Degrees of freedom (error): 292
+Degrees of freedom (regression): 8
+Chi-squared: 242.759133263
+R-squared: 0.999999856534
+R-squared adjusted: 0.999999852604
+Model F-statistic: 254415992.21
+Model F-statistic p-value: 1.11022302463e-16
+Model log-likelihood: -394.736898108
+AIC: 2.68263719673
+BIC: 2.79348102524
+Root Mean Squared Error (RMSE): 0.898058321259
+*/
+float Exponential_BrunoTorremansQuadrupleExponential_model(float x_in)
+{
+ float temp;
+ temp = 0.0;
+ // coefficients
+ float R1 = 7.0284603969763122E+00;
+ float R2 = 7.9771306460732962E-20; // to smale for nxc?
+ float R3 = 9.3877953198910909E+03;
+ float R4 = 1.6839151415346091E-08;
+ float T1 = -5.3425086476591233E+01;
+ float T2 = -2.4690894461993835E+00;
+ float T3 = -5.7137547667198555E+02;
+ float T4 = -1.2186630420238423E+01;
+ float Offset = 1.9393526624465438E+04;
+ temp = Offset - R1*exp(-x_in/T1) - R2*exp(-x_in/T2) - R3*exp(-x_in/T3) - R4*exp(-x_in/T4);
+ return temp;
+}
+
+
+/*
+Good precision but still 0-1ms process time
+
+Degrees of freedom (error): 293
+Degrees of freedom (regression): 7
+Chi-squared: 450.931905954
+R-squared: 0.999999733508
+R-squared adjusted: 0.999999727142
+Model F-statistic: 157067265.355
+Model F-statistic p-value: 1.11022302463e-16
+Model log-likelihood: -487.93351335
+AIC: 3.29523929136
+BIC: 3.39376713893
+Root Mean Squared Error (RMSE): 1.22397411916
+*/
+inline float NIST_NIST_Hahn_ReciprocalWithOffset_model(float x_in)
+{
+ float temp;
+ temp = 0.0;
+ // coefficients
+ float a = 9.9183923433668303E+02;
+ float b = -6.6718015164698770E+00;
+ float c = 1.3104369231617202E-02;
+ float d = -6.2052707487627641E-06;
+ float f = -1.6422734864592698E+04;
+ float g = 9.5495419568164834E+01;
+ float h = -1.3661550333888206E-01;
+ float Offset = 9.9980906224210339E+03;
+ temp += (a + b * x_in + c * x_in * x_in + d * x_in * x_in * x_in)
+         / (1.0 + f * x_in + g * x_in * x_in + h * x_in * x_in * x_in);
+ temp = 1.0 / temp + Offset;
+ return temp;
+}
+
+/*
+0 - 1 ms process time
+best price-performance ratio
+
+Degrees of freedom (error): 296
+Degrees of freedom (regression): 4
+Chi-squared: 1806.13985744
+R-squared: 0.999998932607
+R-squared adjusted: 0.999998918183
+Model F-statistic: 69327743.115
+Model F-statistic p-value: 1.11022302463e-16
+Model log-likelihood: -696.771952949
+AIC: 4.66293656444
+BIC: 4.72451646917
+Root Mean Squared Error (RMSE): 2.44958458573
+*/
+inline float Peak_GaussianPeak_Modified_ReciprocalWithOffset_model(float x_in)
+{
+   float temp;
+   temp = 0.0;
+   // coefficients
+   float a = 6.7067466741275956E-06;
+   float b = 3.0049147143964012E+02;
+   float c = -2.0800138599864840E+04;
+   float d = 4.7783459332869987E-01;
+   float Offset = -1.4927694368382357E+05;
+   temp = a * exp(-0.5 * pow((x_in-b) / c, d));
+   temp = 1.0 / temp + Offset;
+   return temp;
+}
+
+
+#include "console.nxc"
+
+task main ()
+{
+   initConsole();
+   long x, y;
+   long t1;
+   x = 1;    // testvalue
+   long t0 = CurrentTick();
+   // for(int i=0; i<100; i) {
+   y = NIST_NIST_Hahn_ReciprocalWithOffset_model(x);
+   t1 = CurrentTick() - t0;
+   coutNum(t1);
+   coutNum(y);
+   // compare with other function..
+   y = Peak_GaussianPeak_Modified_ReciprocalWithOffset_model(x);
+   coutNum(y);
+   Wait(10000);
+}

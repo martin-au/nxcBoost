@@ -1,0 +1,32 @@
+
+
+
+/*
+void OnFwd(byte outputs, char pwr)
+{
+   if(outputs < 3) {
+      OnFwd(outputs, pwr);
+   }
+   else if(outputs < 5) {
+      // Mux motor cmd
+   }
+}
+*/
+
+void printf2();
+
+void printf1()
+{
+   printf2();
+}
+
+void printf2()
+{
+   printf1();
+}
+
+task main()
+{
+   printf1();
+   OnFwd(3, 100);
+}

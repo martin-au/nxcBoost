@@ -1,0 +1,703 @@
+/************************************************************************/
+/*                                                                      */
+/* Program Name: NXTMMX-lib.nxc                                         */
+/* =============================                                        */
+/*                                                                      */
+/* Copyright (c) 2008 by mindsensors.com                                */
+/* Email: info (<at>) mindsensors (<dot>) com                           */
+/*                                                                      */
+/* This program is free software. You can redistribute it and/or modify */
+/* it under the terms of the GNU General Public License as published by */
+/* the Free Software Foundation; version 3 of the License.              */
+/* Read the license at: http://www.gnu.org/licenses/gpl.txt             */
+/*                                                                      */
+/************************************************************************/
+/*
+ * When        Who             Comments
+ * 03/09/10    Deepak Patil    Initial authoring.
+ */
+
+
+#define MMX_CONTROL_SPEED      0x01
+#define MMX_CONTROL_RAMP       0x02
+#define MMX_CONTROL_RELATIVE   0x04
+#define MMX_CONTROL_TACHO      0x08
+#define MMX_CONTROL_BRK        0x10
+#define MMX_CONTROL_ON         0x20
+#define MMX_CONTROL_TIME       0x40
+#define MMX_CONTROL_GO         0x80
+
+#define MMX_SETPT_M1     0x42
+#define MMX_SPEED_M1     0x46
+#define MMX_TIME_M1      0x47
+#define MMX_CMD_B_M1     0x48
+#define MMX_CMD_A_M1     0x49
+
+#define MMX_SETPT_M2     0x4A
+#define MMX_SPEED_M2     0x4E
+#define MMX_TIME_M2      0x4F
+#define MMX_CMD_B_M2     0x50
+#define MMX_CMD_A_M2     0x51
+
+/*
+ * Read registers.
+ */
+#define MMX_POSITION_M1  0x62
+#define MMX_POSITION_M2  0x66
+#define MMX_STATUS_M1    0x72
+#define MMX_STATUS_M2    0x73
+#define MMX_TASKS_M1     0x76
+#define MMX_TASKS_M2     0x77
+
+
+/* constants to be used by user programs */
+/*
+ * Motor selection related constants
+ */
+#define MMX_Motor_1                0x01
+#define MMX_Motor_2                0x02
+#define MMX_Motor_Both             0x03
+
+/*
+ * Next action related constants
+ */
+// stop and let the motor coast.
+#define MMX_Next_Action_Float      0x00
+// apply brakes, and resist change to tachometer 
+#define MMX_Next_Action_Brake      0x01
+// apply brakes, and restore externally forced change to tachometer
+#define MMX_Next_Action_BrakeHold  0x02
+
+/*
+ * Direction related constants
+ */
+#define MMX_Direction_Forward      0x01
+#define MMX_Direction_Reverse      0x00
+
+/*
+ * Tachometer related constants
+ */
+#define MMX_Move_Relative 0x01
+#define MMX_Move_Absolute 0x00
+
+#define MMX_Completion_Wait_For    0x01
+#define MMX_Completion_Dont_Wait   0x00
+
+/*
+ * Speed constants, these are just convenience constants,
+ * You can use any value between 0 and 100.
+ */
+#define MMX_Speed_Full 90
+#define MMX_Speed_Medium 60
+#define MMX_Speed_Slow 25
+
+/*
+ * Motor profile related constants
+ */
+#define MMX_Profile_NXT_Motors 0
+#define MMX_Profile_RCX_Motors 1
+#define MMX_Profile_LinearActuators 2
+
+void MMX_FlushPort(byte port)
+{
+  int n;
+  byte nByteReady = 0;
+  byte buf[10];
+
+  while (I2CStatus(port, nByteReady) ==  STAT_COMM_PENDING);
+  n = I2CRead(port, 1, buf);
+  while (n > 0) {
+    while (I2CStatus(port, nByteReady) ==  STAT_COMM_PENDING);
+    n = I2CRead(port, 1, buf);
+  }
+}
+
+bool MMX_i2cread_2_bytes(byte port, byte addr, byte reg, byte &retVal[])
+{
+  byte cmdbuf[];
+  byte buf[3];
+  byte nByteReady = 0;
+  byte loop, n;
+  int count;
+
+  ArrayBuild(cmdbuf, addr, reg);
+  while (I2CStatus(port, nByteReady) ==  STAT_COMM_PENDING);
+  count = 2;
+  if(I2CBytes(port, cmdbuf, count, buf)) {
+    retVal[0] = buf[0];
+    retVal[1] = buf[1];
+    return true;
+  } else {
+    return false;
+  }
+}
+
+
+byte MMX_i2cread_1_byte(byte port, byte addr, byte reg)
+{
+  byte cmdbuf[];
+  byte buf[3];
+  byte nByteReady = 0;
+  byte loop, n;
+
+ // SetSensorLowspeed(port);
+  ArrayBuild(cmdbuf, addr, reg);
+
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+  n = I2CWrite(port, 1, cmdbuf);
+
+
+  while (I2CStatus(port, nByteReady) ==  STAT_COMM_PENDING);
+  n = I2CRead(port, 1, buf);
+
+  if ( n == NO_ERR ) {
+    while (I2CStatus(port, nByteReady) ==  STAT_COMM_PENDING);
+    return(buf[0]);
+  } else {
+    return (0);
+  }
+}
+
+/**
+ * Read a long from MMX
+ */
+long MMX_ReadLong (byte port, byte i2cAddr, int reg_to_read)
+{
+  byte message[];
+  unsigned byte buf[20];
+  long count, l, a, b;
+  long result = 0;
+  byte nByteReady = 0;
+
+  ArrayBuild(message, i2cAddr, reg_to_read);
+  while (I2CStatus(port, nByteReady) ==  STAT_COMM_PENDING);
+  count = 4;
+  if(I2CBytes(port, message, count, buf)) {
+    result = buf[0] + (buf[1]<<8) + (buf[2]<<16) + (buf[3]<<24);
+  }
+  return result;
+}
+
+byte MMX_MotorStatus(byte port, byte addr, byte motor_number)
+{
+  byte result, result2;
+  byte res[3];
+  string msg, x;
+
+  if ( motor_number == MMX_Motor_1 ) {
+    return (MMX_i2cread_1_byte(port, addr, MMX_STATUS_M1));
+  }
+
+  if ( motor_number == MMX_Motor_2 ) {
+    MMX_i2cread_2_bytes(port, addr, MMX_STATUS_M1, res);
+    return (res[1]);
+  }
+
+  if ( motor_number == MMX_Motor_Both ) {  // not supported
+    return 0xff;
+  }
+}
+
+bool MMX_IsTimeDone(byte port, byte addr, byte motor_number)
+{
+  byte result, result2;
+  byte res[3];
+  string msg, x;
+
+  if ( motor_number == MMX_Motor_1 ) {
+    result = MMX_i2cread_1_byte(port, addr, MMX_STATUS_M1);
+    // look for the time bit to be zero.
+    if (( result & 0x40 ) == 0 ) return true;
+  } else if ( motor_number == MMX_Motor_2 ) {
+    MMX_i2cread_2_bytes(port, addr, MMX_STATUS_M1, res);
+    result = res[1];
+    // look for the time bit to be zero.
+    if (( result & 0x40 ) == 0 ) return true;
+  } else if ( motor_number == MMX_Motor_Both ) {
+    MMX_i2cread_2_bytes(port, addr, MMX_STATUS_M1, res);
+    // look for both time bits to be zero
+    result = res[0];
+    result2 = res[1];
+    if (((result & 0x40) == 0) && ((result2 & 0x40) == 0) ) return true;
+  }
+  return false;
+}
+
+void MMX_WaitUntilTimeDone(byte port, byte addr, byte motor_number)
+{
+    while ( MMX_IsTimeDone(port, addr, motor_number) != true ) Wait(50);
+}
+
+
+bool MMX_IsTachoDone(byte port, byte addr, byte motor_number)
+{
+  byte result, result2;
+  byte res[3];
+  string msg, x;
+
+  if ( motor_number == MMX_Motor_1 ) {
+    result = MMX_i2cread_1_byte(port, addr, MMX_STATUS_M1);
+    // look for the tacho bit to be zero.
+    if (( result & 0x08 ) == 0 ) return true;
+  } else if ( motor_number == MMX_Motor_2 ) {
+    MMX_i2cread_2_bytes(port, addr, MMX_STATUS_M1, res);
+    result = res[1];
+    // look for the tacho bit to be zero.
+    if (( result & 0x08 ) == 0 ) return true;
+  } else if ( motor_number == MMX_Motor_Both ) {
+    MMX_i2cread_2_bytes(port, addr, MMX_STATUS_M1, res);
+    // look for both tacho bits to be zero
+    result = res[0];
+    result2 = res[1];
+    if (((result & 0x08) == 0) && ((result2 & 0x08) == 0) ) return true;
+  }
+  return false;
+}
+
+void MMX_WaitUntilTachoDone(byte port, byte addr, byte motor_number)
+{
+    while ( MMX_IsTachoDone(port, addr, motor_number) != true ) Wait(50);
+}
+
+int MMX_SendCommand(byte port, byte addr, byte cmd)
+{
+  byte cmdBuf[];
+  byte nByteReady = 0;
+
+  ArrayBuild(cmdBuf, addr, 0x41, cmd);
+  I2CWrite(port, 0, cmdBuf);
+  while (I2CStatus(port, nByteReady) ==  STAT_COMM_PENDING);
+  int status = I2CCheckStatus(port);
+  while (status > NO_ERR)
+    status = I2CCheckStatus(port);
+  return status;
+}
+
+byte MMX_WriteData9(byte port, byte addr, byte data1, byte data2,
+                               byte data3, byte data4, byte data5,
+                               byte data6, byte data7, byte data8,
+                               byte data9)
+{
+  byte cmdbuf[];
+  byte loop;
+  byte nByteReady = 0;
+  byte n;
+  string msg;
+
+  ArrayBuild(cmdbuf, addr, data1, data2, data3, data4, data5, data6, data7, data8, data9);
+
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+  n = I2CWrite(port, 0, cmdbuf); // send the message you built
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+}
+
+byte MMX_WriteData3(byte port, byte addr, byte data1, byte data2, byte data3)
+{
+  byte cmdbuf[];
+  byte loop;
+  byte nByteReady = 0;
+  byte n;
+
+  ArrayBuild(cmdbuf, addr, data1, data2, data3);
+
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+  n = I2CWrite(port, 0, cmdbuf); // send the message you built
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+}
+
+byte MMX_WriteData5(byte port, byte addr, byte data1, byte data2, byte data3, byte data4, byte data5)
+{
+  byte cmdbuf[];
+  byte loop;
+  byte nByteReady = 0;
+  byte n;
+
+  ArrayBuild(cmdbuf, addr, data1, data2, data3, data4, data5);
+
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+  n = I2CWrite(port, 0, cmdbuf); // send the message you built
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+}
+
+byte MMX_WriteByte(byte port, byte i2cAddr, byte location, byte data)
+{
+  byte cmdbuf[];
+  byte loop;
+  byte nByteReady = 0;
+  byte  n;
+
+  ArrayBuild(cmdbuf, i2cAddr, location, data);
+
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+
+  // when the I2C bus is ready, send the message you built
+  n = I2CWrite(port, 0, cmdbuf);
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+  return n;
+}
+
+void MMX_Init( byte port, byte addr, byte profile )
+{
+  SetSensorLowspeed(port);
+
+	switch (profile) {
+  case MMX_Profile_NXT_Motors:
+		// do nothing.
+	  break;
+  case MMX_Profile_RCX_Motors:
+		MMX_WriteByte(port, addr, 0x46, 0);  // set M1 speed to zero.
+		MMX_WriteByte(port, addr, 0x4e, 0);  // set M2 speed to zero.
+		MMX_WriteByte(port, addr, 0x7a, 0);  // set P lo-byte to zero.
+		MMX_WriteByte(port, addr, 0x7b, 0);  // set P hi-byte to zero.
+	  break;
+  case MMX_Profile_LinearActuators:
+		// not implemented yet.
+	  break;
+	default:
+		TextOut(0, LCD_LINE5, "MMX: Incorrect ", false);
+		TextOut(0, LCD_LINE6, "Motor Profile. ", false);
+		TextOut(0, LCD_LINE7, "               ", false);
+		TextOut(0, LCD_LINE8, "Press ORNG Btn ", false);
+		PlayTone (440,200);
+		Wait (500);
+		PlayTone (440,200);
+		until(ButtonPressed(BTNCENTER, true));
+		StopAllTasks();
+    break;
+	}
+}
+
+int MMX_Run_Unlimited( byte port,
+                             byte addr,
+                             byte motor_number,
+                             byte direction,
+                             byte speed )
+{
+  byte ctrl;
+  byte sp;
+
+  ctrl = 0;
+  ctrl |= MMX_CONTROL_SPEED;
+
+  if ( direction == MMX_Direction_Forward ) sp = speed;
+  if ( direction != MMX_Direction_Forward ) sp = (speed*(-1));
+  if ( motor_number != MMX_Motor_Both ) ctrl |= MMX_CONTROL_GO;
+
+  if ( (motor_number & 0x01) != 0 ) {
+    MMX_WriteData5(port, addr, MMX_SPEED_M1, sp, 0, 0, ctrl);
+  }
+  if ( (motor_number & 0x02) != 0 ) {
+    MMX_WriteData5(port, addr, MMX_SPEED_M2, sp, 0, 0, ctrl);
+  }
+  if ( motor_number == MMX_Motor_Both ) {
+    MMX_SendCommand(port, addr, 'S');
+  }
+  MMX_FlushPort(port);
+
+  return 0;
+}
+
+int MMX_Run_Seconds( byte port,
+                             byte addr,
+                             byte motor_number,
+                             byte direction,
+                             byte speed,
+                             byte duration,
+                             byte wait_for_completion,
+                             byte next_action )
+{
+  byte ctrl;
+  byte cmdbuf[];
+  byte loop;
+  byte nByteReady = 0;
+  int  n;
+  byte sp;
+
+  ctrl = 0;
+  ctrl |= MMX_CONTROL_SPEED;
+  ctrl |= MMX_CONTROL_TIME;
+
+  if ( next_action == MMX_Next_Action_Brake ) ctrl |= MMX_CONTROL_BRK;
+  if ( next_action == MMX_Next_Action_BrakeHold ) {
+    ctrl |= MMX_CONTROL_BRK;
+    ctrl |= MMX_CONTROL_ON;
+  }
+  if ( motor_number != MMX_Motor_Both ) ctrl |= MMX_CONTROL_GO;
+  if ( direction == MMX_Direction_Forward ) sp = speed;
+  if ( direction != MMX_Direction_Forward ) sp = (speed*(-1));
+
+  if ( (motor_number & 0x01) != 0 ) {
+    MMX_WriteData5(port, addr, MMX_SPEED_M1, sp, duration, 0, ctrl);
+  }
+  if ( (motor_number & 0x02) != 0 ) {
+    MMX_WriteData5(port, addr, MMX_SPEED_M2, sp, duration, 0, ctrl);
+  }
+  if ( motor_number == MMX_Motor_Both ) {
+    MMX_SendCommand(port, addr, 'S');
+  }
+
+  MMX_FlushPort(port);
+  if ( wait_for_completion == MMX_Completion_Wait_For ) {
+    Wait(50);  // this delay is required for the status byte to be available for reading.
+    MMX_WaitUntilTimeDone(port, addr, motor_number);
+  }
+  MMX_FlushPort(port);
+
+  return 0;
+}
+
+int MMX_Run_Tachometer( byte port,
+                             byte addr,
+                             byte motor_number,
+                             byte direction,
+                             byte speed,
+                             long tachometer,
+                             byte relative,
+                             byte wait_for_completion,
+                             byte next_action )
+{
+  byte ctrl;
+  byte cmdbuf[];
+  byte loop;
+  byte nByteReady = 0;
+  int  n;
+  long tch;
+  byte stp1,stp2,stp3,stp4;
+  string msg;
+
+  ctrl = 0;
+  ctrl |= MMX_CONTROL_TACHO;
+  ctrl |= MMX_CONTROL_SPEED;
+
+  if ( relative == MMX_Move_Relative ) {
+    ctrl |= MMX_CONTROL_RELATIVE; 
+    /*
+     * if the move requested is relative, 
+     * follow the direction to set the tachometer value.
+     */
+    
+    if ( direction == MMX_Direction_Forward ) tch = tachometer;
+    if ( direction != MMX_Direction_Forward ) tch = (tachometer*(-1));
+  } else {
+    /*
+     * if the move is absolute,
+     * use the tach value as is and ignore the direction.
+     */
+    tch = tachometer;
+  }
+
+  stp1 = 0xff&tch;
+  stp2 = 0xff&((0x0000ff00&tch)>>8);
+  stp3 = 0xff&((0x00ff0000&tch)>>16);
+  stp4 = 0xff&((0xff000000&tch)>>24);
+
+  if ( next_action == MMX_Next_Action_Brake ) ctrl |= MMX_CONTROL_BRK;
+  if ( next_action == MMX_Next_Action_BrakeHold ) {
+    ctrl |= MMX_CONTROL_BRK;
+    ctrl |= MMX_CONTROL_ON;
+  }
+  if ( motor_number != MMX_Motor_Both ) ctrl |= MMX_CONTROL_GO;
+
+  if ( (motor_number & 0x01) != 0 ) {
+    MMX_WriteData9(port, addr, MMX_SETPT_M1, stp1, stp2, stp3, stp4, speed, 0, 0, ctrl);
+  }
+  if ( (motor_number & 0x02) != 0 ) {
+    MMX_WriteData9(port, addr, MMX_SETPT_M2, stp1, stp2, stp3, stp4, speed, 0, 0, ctrl);
+  }
+  if ( motor_number == MMX_Motor_Both ) {
+    MMX_SendCommand(port, addr, 'S');
+  }
+
+  MMX_FlushPort(port);
+  if ( wait_for_completion == MMX_Completion_Wait_For ) {
+    Wait(50);  // this delay is required for the status byte to be available for reading.
+    MMX_WaitUntilTachoDone(port, addr, motor_number);
+  }
+  MMX_FlushPort(port);
+
+  return 0;
+}
+
+int MMX_Run_Degrees( byte port,
+                             byte addr,
+                             byte motor_number,
+                             byte direction,
+                             byte speed,
+                             long degrees,
+                             byte wait_for_completion,
+                             byte next_action )
+{
+  return MMX_Run_Tachometer( port, addr, motor_number, direction,
+                             speed, degrees, MMX_Move_Relative,
+                             wait_for_completion, next_action);
+}
+
+int MMX_Run_Rotations( byte port,
+                             byte addr,
+                             byte motor_number,
+                             byte direction,
+                             byte speed,
+                             byte rotations,
+                             byte wait_for_completion,
+                             byte next_action )
+{
+  return MMX_Run_Tachometer( port, addr, motor_number, direction,
+                             speed, (rotations*360), MMX_Move_Relative,
+                             wait_for_completion, next_action);
+}
+
+/*
+ * Stop command supports floating of motors or brake.
+ * When brake is issued, it does not support further hold.
+ * i.e. BrakeHold works as Brake.
+ *
+ */
+int MMX_Stop( byte port, byte addr,
+                     byte motor_number,
+                     byte next_action )
+{
+  if ( next_action == MMX_Next_Action_Brake ||
+       next_action == MMX_Next_Action_BrakeHold ) {
+    if ( motor_number == MMX_Motor_1  ) {
+      MMX_SendCommand(port, addr, 'A');
+    }
+    if ( motor_number == MMX_Motor_2 ) {
+      MMX_SendCommand(port, addr, 'B');
+    }
+    if ( motor_number == MMX_Motor_Both ) {
+      MMX_SendCommand(port, addr, 'C');
+    }
+  } else {  // float
+    if ( motor_number == MMX_Motor_1 ) {
+      MMX_SendCommand(port, addr, 'a');
+    }
+    if ( motor_number == MMX_Motor_2 ) {
+      MMX_SendCommand(port, addr, 'b');
+    }
+    if ( motor_number == MMX_Motor_Both ) {
+      MMX_SendCommand(port, addr, 'c');
+    }
+  }
+  MMX_FlushPort(port);
+  return 0;
+}
+
+/*===================================
+**
+** Read voltage supplied to MMX 
+** from the external battery
+** (in mili-volts)
+**
+===================================*/
+int  MMX_GetBattVoltage(byte port, byte addr)
+{
+  byte cmdbuf[];
+  byte buf[3];
+  byte nByteReady = 0;
+  byte loop, n;
+
+ // SetSensorLowspeed(port);
+  ArrayBuild(cmdbuf, addr, 0x41);
+
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+  n = I2CWrite(port, 1, cmdbuf);
+
+
+  while (I2CStatus(port, nByteReady) ==  STAT_COMM_PENDING);
+  n = I2CRead(port, 1, buf);
+
+  if ( n == NO_ERR ) {
+    while (I2CStatus(port, nByteReady) ==  STAT_COMM_PENDING);
+    return(37*(0x00FF & buf[0]));  // 37 is calculated from
+                            //supply from NXT =4700 mv /128
+  } else {
+    return (0);
+  }
+}
+
+long MMX_ReadTachometerPosition( byte port, byte addr,
+                     byte motor_number)
+{
+  if ( motor_number == MMX_Motor_1 ) {
+    return MMX_ReadLong(port, addr, MMX_POSITION_M1);
+  } else if ( motor_number == MMX_Motor_2 ) {
+    return MMX_ReadLong(port, addr, MMX_POSITION_M2);
+  }
+  else return 0;
+}
+
+void MMX_SetPerformanceParameters( byte port, byte addr,
+                 int KP_tacho,
+                 int KI_tacho,
+                 int KD_tacho,
+                 int KP_speed,
+                 int KI_speed,
+                 int KD_speed,
+                 byte pass_count,
+                 byte tolerance)
+{
+  byte cmdbuf[16];
+  byte loop;
+  byte nByteReady = 0;
+  byte n;
+
+  cmdbuf[0] = addr;
+  cmdbuf[1] = 0x7A; // location where the PID begins
+  cmdbuf[2] =    (KP_tacho & 0xFF);
+  cmdbuf[3] =  (((KP_tacho &0xFF00)>>8) & 0xFF);
+  cmdbuf[4] =    (KI_tacho & 0xFF);
+  cmdbuf[5] =  (((KI_tacho &0xFF00)>>8) & 0xFF);
+  cmdbuf[6] =    (KD_tacho & 0xFF);
+  cmdbuf[7] =  (((KD_tacho &0xFF00)>>8) & 0xFF);
+
+  cmdbuf[8] =    (KP_speed & 0xFF);
+  cmdbuf[9] =  (((KP_speed &0xFF00)>>8) & 0xFF);
+  cmdbuf[10] =   (KI_speed & 0xFF);
+  cmdbuf[11] = (((KI_speed &0xFF00)>>8) & 0xFF);
+  cmdbuf[12] =   (KD_speed & 0xFF);
+  cmdbuf[13] = (((KD_speed &0xFF00)>>8) & 0xFF);
+  cmdbuf[14] = pass_count;
+  cmdbuf[15] = tolerance;
+
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+
+  // when the I2C bus is ready, send the message you built
+  n = I2CWrite(port, 0, cmdbuf);
+  loop = STAT_COMM_PENDING;
+  while ( loop == STAT_COMM_PENDING ) {
+    loop = I2CStatus(port, nByteReady);
+  }
+}

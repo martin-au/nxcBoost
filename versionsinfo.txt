@@ -1,0 +1,14 @@
+
+v0.1 release
+------------------
+
+
+v0.11
+
+debug-com ifndef save: now before includes
+debug-console "-"
+
+
+
+bugs:
+problem with motorcontrollers moveRel same name (code completion!)

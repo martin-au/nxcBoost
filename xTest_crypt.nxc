@@ -1,0 +1,140 @@
+
+#include "console.nxc"
+
+
+// start at 33 end at 127, 127
+inline string encrypt(string str, string key, bool mode = true)
+{
+   int key_count = 0;
+   string ret = "**********************************************";
+	 char ch;
+
+   for(int i=0; i<strlen(str); i++) {
+
+     if(!mode)
+        str[i]--;
+     ch = str[i] ^ key[key_count];
+     if(mode)
+        ch++;
+     ret[i] = ch;
+     key_count++;
+		 if(key_count >= strlen(key))
+			 key_count = 0;
+
+     // coutNum(str[i], 500);
+     // coutNum(key[key_count], 500);
+     // coutNum(ch, 500);
+     // cout(ret, 500);
+   }
+   return LeftStr(ret, strlen(str));
+}
+
+/*
+inline string decrypt(string str, string key)
+{
+   int key_count = 0;
+	 string ret = "**********************************************";
+	 char ch;
+
+   for(int i=0; i<strlen(str); i++) {
+
+     str[i]--;
+
+     ch = str[i] ^ key[key_count];
+
+     // coutNum(str[i], 500);
+     // coutNum(key[key_count], 500);
+     // coutNum(ch, 500);
+
+     ret[i] = ch;
+
+     // cout(ret, 500);
+
+		 //Increment key_count and start over if necessary
+		 key_count++;
+		 if(key_count == strlen(key))
+			 key_count = 0;
+
+   }
+
+   return LeftStr(ret, strlen(str));
+
+}
+*/
+
+
+void createASCII()
+{
+   byte handle;
+   char ch;
+   string str;
+   unsigned int cnt;
+   unsigned int ret;
+ 
+ DeleteFile("ASCII.txt");
+ 
+ if (CreateFile("ASCII.txt", 2048, handle) == NO_ERR) {
+    for (int i=33; i < 38; i++) {
+       ch = i;
+       sprintf(str, "%c", ch);
+       str = "abcdefgh";
+       ret = WriteLnString(handle,  str, cnt);
+       Wait(1);
+    }
+    CloseFile(handle);
+  }
+  else {
+     TextOut(0, LCD_LINE1, "ERROR");
+     Wait(5000);
+  }
+}
+
+
+
+
+task main()
+{
+   initConsole(2);
+   cout("Create ASCII", SEC_1);
+   createASCII();
+   
+   cout("Create crpt File", SEC_1);
+   byte handle_crpt;
+   DeleteFile("crpt.txt");
+   CreateFile("crpt.txt", 2048, handle_crpt);
+   
+   cout("Open ascii File", SEC_1);
+   int tmp;
+   byte handle_norm;
+   OpenFileRead("ASCII.txt", tmp, handle_norm);
+   
+   rewind(handle_norm);
+   string line;
+   while( ReadLnString(handle_norm, line) != LDR_ENDOFFILE ) {
+      cout(line, 100);
+      string crypt = encrypt(line, "key", true);
+      cout(crypt, 100);
+      WriteLnString(handle_crpt,  crypt, tmp);
+   }
+   
+   cout("Fertig", SEC_1);
+   cout("Close File", SEC_1);
+   CloseFile(handle_norm);
+   CloseFile(handle_crpt);
+   
+   byte handle_outp;
+   DeleteFile("output.txt");
+   CreateFile("output.txt", 2024, handle_outp);
+   OpenFileRead("crpt.txt", tmp, handle_crpt);
+
+   while( ReadLnString(handle_crpt, line) != LDR_ENDOFFILE ) {
+      cout(line, 100);
+      string norm = encrypt(line, "key", false);
+      cout(norm, 100);
+      WriteLnString(handle_outp,  norm, tmp);
+   }
+   
+   CloseFile(handle_outp);
+   CloseFile(handle_crpt);
+}
+
